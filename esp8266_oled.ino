@@ -10,59 +10,67 @@
 #include "weathericons.h"
 #include "selectweatherfont.h"
 
+/* ----------------------------------------------------------全局数据定义以及特殊变量声明--------------------------------------------------------------- */
 
 SSD1306Wire  display(0x3c, 2, 0);
 OLEDDisplayUi ui     ( &display );
 
+/* wifi连接与配网相关定义 */
+
 const char* WIFI_SSID = "zb";  //WIFI名称及密码
 const char* WIFI_PWD = "571388081";
 
-Ticker tick_key; //按键1扫描定时器
+/* 天气api相关定义 */
 
 const String UserKey = "c2309af516b04492a222943c075683c3";   // 私钥 https://dev.heweather.com/docs/start/get-api-key
-const String Location = "101280101"; // 城市代码 https://github.com/heweather/LocationList,表中的 Location_ID
-const String Unit = "m";             // 公制-m/英制-i
-const String Lang = "en";            // 语言 英文-en/中文-zh
-int ROUND = 15 * 60000;              // 更新间隔<分钟>实时天气API 10~20分钟更新一次
+const String Location = "101280101";                         // 城市代码 https://github.com/heweather/LocationList,表中的 Location_ID
+const String Unit = "m";                                     // 公制-m/英制-i
+const String Lang = "en";                                    // 语言 英文-en/中文-zh
+int ROUND = 15 * 60000;                                      // 更新间隔<分钟>实时天气API 10~20分钟更新一次
 WeatherNow weatherNow;
-
-String WEATHER_ICON; //天气图片
-String TEMP; //温度
-char WEATHER_TYPE[100]; //天气类型
-float HUM;
-int WIND = 0;
-
+String WEATHER_ICON;      //天气图片
+char WEATHER_TYPE[100];   //天气类型
+String TEMP;              //温度
+float HUM;                //湿度
+int length = 0;           //天气类型中文长度
 
 
-int length = 0;
-
-String IP_ADDRESS; //IP地址
-const int DISPLAY_LIGHT_MODE = 1; //显示模式 1：长亮，0：30秒后自动息屏
+/* 日期更新相关宏定义 */
 
 const String WDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};  //星期
-#define TZ              8      // 时区为8
-#define DST_MN          0      // 默认为0
+#define TZ              8 // 时区为8
+#define DST_MN          0 // 默认为0
 #define TZ_MN           ((TZ)*60)   
 #define TZ_SEC          ((TZ)*3600)
 #define DST_SEC         ((DST_MN)*60)
 
-int KEY_DOWN_COUNT = 0; //按键按下计数
-int KEY_STATE_NOW =  0; //按键目前状态
-int KEY_STATE  =     0; //按键即将判断的状态 1：短按，2：长按
-int KEY_NUM  =       0; //按键编号
 
-bool initflag = true;
+Ticker tick_key;           //按键1扫描定时器
+int KEY_DOWN_COUNT    = 0; //按键按下计数
+int KEY_STATE_NOW     = 0; //按键目前状态
+int KEY_STATE         = 0; //按键即将判断的状态 1：短按，2：长按
+int KEY_NUM           = 0; //按键编号
 
-void drawProgress(OLEDDisplay *display, int percentage, String label) {    //绘制进度
+/* 功能变量例如按键功能判断IP地址等 */
+
+const int DISPLAY_LIGHT_MODE = 1; //显示模式 1：长亮，0：30秒后自动息屏
+String IP_ADDRESS;                //IP地址
+
+
+
+/* ----------------------------------------------------------在没进入框架前的处理--------------------------------------------------------------- */
+
+/* 单个进度条方法 */
+void drawProgress(OLEDDisplay *display, int progress, String label) {
   display->clear();
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->setFont(ArialMT_Plain_10);
   display->drawString(64, 10, label);
-  display->drawProgressBar(2, 28, 124, 10, percentage);
+  display->drawProgressBar(2, 28, 124, 10, progress);
   display->display();
 }
-
-void upDate(OLEDDisplay *display) {  //首次天气更新
+/* 初次更新进度 */
+void upDateProgress(OLEDDisplay *display) {  //首次天气更新
   drawProgress(display, 0, "");
   wificonnect();
   drawProgress(display, 33, "Please wait Updating weather...");
@@ -85,14 +93,16 @@ void upDate(OLEDDisplay *display) {  //首次天气更新
   delay(200);
 }
 
+
+/* ----------------------------------------------------------框架页面函数--------------------------------------------------------------- */
+
+/* 覆盖层 */
 void drawIpOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   int x,y;
   display->drawHorizontalLine(0, 54, 128);//画横线
-  // display->setTextAlignment(TEXT_ALIGN_CENTER);
-  // display->setFont(ArialMT_Plain_10);
-  // display->drawString(64+x, 54+y, "IP:"+IP_ADDRESS);
 }
 
+/* 日期页面 */
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   time_t now = time(nullptr);
   struct tm* timeInfo = localtime(&now);
@@ -123,6 +133,7 @@ void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
     display->drawXbm(96+x, 5+y, 16,16, ri);
 }
 
+/* 天气页面 */
 void drawWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->setFont(Meteocons_Plain_36);
@@ -144,27 +155,18 @@ void drawWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
   display->drawString(x + 100, y + 38, ':' + String(int(HUM)) + '%');
 }
 
-void drawFrame3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  // Text alignment demo
-  display->setFont(ArialMT_Plain_10);
 
-  // The coordinates define the left starting point of the text
+void drawFrame3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  display->setFont(ArialMT_Plain_10);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->drawString(0 + x, 11 + y, "Left aligned (0,10)");
-
-  // The coordinates define the center of the text
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 + x, 22 + y, "Center aligned (64,22)");
-
-  // The coordinates define the right end of the text
   display->setTextAlignment(TEXT_ALIGN_RIGHT);
   display->drawString(128 + x, 33 + y, "Right aligned (128,33)");
 }
 
 void drawFrame4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  // Demo for drawStringMaxWidth:
-  // with the third parameter you can define the width after which words will be wrapped.
-  // Currently only spaces and "-" are allowed for wrapping
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->setFont(ArialMT_Plain_10);
   display->drawStringMaxWidth(0 + x, 10 + y, 128, "Lorem ipsum\n dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore.");
@@ -174,13 +176,17 @@ void drawFrame5(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int1
   display->drawXbm(96+x, 5+y, 16,16, ri);
 }
 
+/* 页面框架定义 */
 FrameCallback frames[] = { drawDateTime, drawWeather, drawFrame3, drawFrame4, drawFrame5 };
 int frameCount = 5;
 
 OverlayCallback overlays[] = { drawIpOverlay };
 int overlaysCount = 1;
 
-//IP地址转字符串
+
+/* ------------------------------------------------------------方法和数据更新----------------------------------------------------------------- */
+
+/* IP地址转字符串 */
 String ip2Str(IPAddress ip) { 
   String s = "";
   for (int i = 0; i < 4; i++) {
@@ -189,8 +195,7 @@ String ip2Str(IPAddress ip) {
   return s;
 }
 
-
-
+/* 按键扫描以及功能 */
 void keyScan() {
   if(digitalRead(3)==0 && digitalRead(1)!=0){
     KEY_DOWN_COUNT++;
@@ -238,16 +243,17 @@ void keyScan() {
   }
 }
 
+/* 显示单个中文字符 */
 void drawCNword(OLEDDisplay *display, int x0, int y0, const char chinese[3]){
   int x,y;
   for(int i = 0; i < 45; i++) {
     if(CN12LIST[i].Index[0] == chinese[0] && CN12LIST[i].Index[1] == chinese[1] && CN12LIST[i].Index[2] == chinese[2]) {
-      display->setTextAlignment(TEXT_ALIGN_CENTER);
       display->drawXbm(x + x0, y + y0, 12, 12, CN12LIST[i].cn12_id);
     }
   }
 }
 
+/* 显示多个中文（无标点符号以及英文字母） */
 void drawChinese(OLEDDisplay *display, int x, int y, const char chinese[]) {
   int x0 = x;
   int i = 0;
@@ -258,7 +264,8 @@ void drawChinese(OLEDDisplay *display, int x, int y, const char chinese[]) {
   }
 }
 
-void wificonnect() {  //WIFI连接
+/* WiFi配网 */
+void wificonnect() {  
   WiFi.begin(WIFI_SSID, WIFI_PWD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(80);
@@ -266,21 +273,18 @@ void wificonnect() {  //WIFI连接
   delay(500);
 }
 
+
+/* ----------------------------------------------------------主进程--------------------------------------------------------------- */
 void setup() {
   display.init();
   display.clear();
   display.display();
   display.flipScreenVertically();
-  upDate(&display);
+  upDateProgress(&display);
   pinMode(3, INPUT);
   pinMode(1, INPUT);
-  
-  
   tick_key.attach_ms(1, keyScan);
-  
-  
   IP_ADDRESS = ip2Str(WiFi.localIP());
-
   ui.setTargetFPS(45);
   ui.setActiveSymbol(activeSymbol);
   ui.setInactiveSymbol(inactiveSymbol);
@@ -296,10 +300,10 @@ void setup() {
 }
 
 
+/* ----------------------------------------------------------循环（定时更新数据）--------------------------------------------------------------- */
 void loop() {
   display.clear();
   int remainingTimeBudget = ui.update();
-
   if (remainingTimeBudget > 0) {
     delay(remainingTimeBudget);
   }

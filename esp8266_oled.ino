@@ -84,7 +84,12 @@ void drawUnconfigOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
 
 /* 配网二维码页面 */
 void drawQRCode(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  display->drawXbm(96+x, 5+y, 16,16, ri);
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
+  display->drawXbm(0+x, 0+y, qrcode_width,qrcode_height, qrcode);
+  drawChinese(display, 66 + x, 0 + y, "扫描左侧二");
+  drawChinese(display, 66 + x, 16 + y, "维码获取名");
+  drawChinese(display, 66 + x, 32 + y, "称密码或直");
+  drawChinese(display, 66 + x, 50 + y, "接连接");
 }
 
 /* 日期页面 */
@@ -160,7 +165,7 @@ void drawFrame5(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int1
   display->drawXbm(96+x, 5+y, 16,16, ri);
 }
 FrameCallback frames[] = { drawDateTime, drawWeather, drawFrame3, drawFrame4, drawFrame5 }; //已配网的页面框架
-FrameCallback unconfigframes[] = { drawFrame5 }; //未配网的页面框架
+FrameCallback unconfigframes[] = { drawQRCode }; //未配网的页面框架
 int frameCount = 5;
 OverlayCallback overlays[] = { drawOverlay }; //已配网的页面覆盖层
 OverlayCallback unconfigoverlays[] = { drawUnconfigOverlay };
@@ -173,12 +178,10 @@ int overlaysCount = 1;
 /* 配置网络和初次更新信息 */
 
 void configUpdate(OLEDDisplay *display) {
-  String tag = "normal";
-  drawProgress(display, 0, "open spiffs");
+  drawProgress(display, 10, "连接中");
   if (SPIFFS.begin()) { // 打开闪存文件系统 
     Serial.println("闪存文件系统打开成功");
   } else {
-     tag = "error";
      Serial.println("闪存文件系统打开失败");
   }
   if(SPIFFS.exists("/config.json")){ // 判断有没有config.json这个文件
@@ -204,7 +207,7 @@ void configUpdate(OLEDDisplay *display) {
     IPAddress softGateway(192,168,1,1);
     IPAddress softSubnet(255,255,255,0);
     WiFi.softAPConfig(softLocal, softGateway, softSubnet);
-    WiFi.softAP("esp8266", "12345678"); //这里是配网模式下热点的名字和密码
+    WiFi.softAP("WeatherClock", "liSFYpxC"); //这里是配网模式下热点的名字和密码（不用记）
     Serial.println(WiFi.softAPIP());
     ISCONFIG = false;
     frameCount = 1;
@@ -212,25 +215,26 @@ void configUpdate(OLEDDisplay *display) {
   server.on("/", handleRoot);//web首页监听
   server.on("/set", handleConnect); // 配置ssid密码监听，感觉跟express的路由好像
   server.begin();
-  delay(500);
-  drawProgress(display, 20, tag);
-  delay(1000);
-  drawProgress(display, 50, "Please wait Updating forecasts...");
-  configTime(TZ_SEC, DST_SEC, "ntp.ntsc.ac.cn", "ntp1.aliyun.com"); //ntp获取时间同步系统时间戳
-  drawProgress(display, 80, "Updating...");
-   weatherNow.config(UserKey, Location, Unit, Lang);
-  if(weatherNow.get()){ // 获取天气更新
-    int icon_code = weatherNow.getIcon();
-    WEATHER_ICON = getIcons(String(icon_code));
-    TEMP =  String(weatherNow.getTemp());
-    String type = getWeatherType(icon_code);
-    HUM = weatherNow.getHumidity();
-    length = type.length() / 3;
-    for(int i =0 ; i<type.length(); i++ ) {
-      WEATHER_TYPE[i] = type[i];
+  if(ISCONFIG) {
+    drawProgress(display, 50, "更新时间");
+    configTime(TZ_SEC, DST_SEC, "ntp.ntsc.ac.cn", "ntp1.aliyun.com"); //ntp获取时间同步系统时间戳
+    drawProgress(display, 80, "更新天气");
+    weatherNow.config(UserKey, Location, Unit, Lang);
+    if(weatherNow.get()){ // 获取天气更新
+      int icon_code = weatherNow.getIcon();
+      WEATHER_ICON = getIcons(String(icon_code));
+      TEMP =  String(weatherNow.getTemp());
+      String type = getWeatherType(icon_code);
+      HUM = weatherNow.getHumidity();
+      length = type.length() / 3;
+      for(int i =0 ; i<type.length(); i++ ) {
+        WEATHER_TYPE[i] = type[i];
+      }
     }
+    drawProgress(display, 100, "请稍等");
+  } else {
+    drawProgress(display, 100, "请配网");
   }
-  drawProgress(display, 100, "Wellcome...");
   delay(200);
 }
 
@@ -240,15 +244,25 @@ void configUpdate(OLEDDisplay *display) {
 /* ------------------------------------------------------------方法和数据更新----------------------------------------------------------------- */
 
 /* 单个进度条方法 */
-void drawProgress(OLEDDisplay *display, int progress, String label) {
+void drawProgress(OLEDDisplay *display, int progress, char* label) {
   for (int i = PERCENT; i <= progress; i++ ) {
     display->clear();
+    
     display->setTextAlignment(TEXT_ALIGN_CENTER);
     display->setFont(ArialMT_Plain_10);
-    display->drawString(64, 10, label);
+    // display->drawString(64, 10, label);
+    if (strlen(label) / 3 == 3) {
+      drawChinese(display, 46, 8, label);
+    } else {
+      drawChinese(display, 40, 8, label);
+    }
     display->drawProgressBar(2, 28, 124, 10, i);
     display->display();
-    delay(30);
+    if(ISCONFIG){
+      delay(30);
+    } else {
+      delay(10);
+    }
   }
   PERCENT = progress;
 }
@@ -302,18 +316,28 @@ void keyScan() {
     KEY_NUM = 0;
   }
   if (KEY_STATE_NOW == 0 && KEY_STATE == 2){ //按键长按
+    if(KEY_NUM == 3){
+      display.displayOn();
+      removeData();
+    }
+    if(KEY_NUM == 1){
+      display.displayOff();
+    }
     KEY_STATE = 0;
+    KEY_NUM = 0;
   }
   if(KEY_STATE_NOW == 0 && KEY_STATE == 3){
-    display.displayOff();
+    removeConfig();
+    ESP.restart();
     KEY_STATE = 0;
+    KEY_NUM = 0;
   }
 }
 
 /* 显示单个中文字符 */
 void drawCNword(OLEDDisplay *display, int x0, int y0, const char chinese[3]){
   int x,y;
-  for(int i = 0; i < 45; i++) {
+  for(int i = 0; i < 73; i++) {
     if(CN12LIST[i].Index[0] == chinese[0] && CN12LIST[i].Index[1] == chinese[1] && CN12LIST[i].Index[2] == chinese[2]) {
       display->drawXbm(x + x0, y + y0, 12, 12, CN12LIST[i].cn12_id);
     }
@@ -365,6 +389,7 @@ void handleConnect() { //处理配置信息的函数
   File wifiConfig = SPIFFS.open("/config.json", "w");
   wifiConfig.println(payload);//将数据写入config.json文件中
   wifiConfig.close();
+  ESP.restart();
 }
 
 void removeConfig(){
@@ -377,18 +402,29 @@ void removeConfig(){
     }
 }
 
+void removeData(){
+    if(SPIFFS.exists("/index.html")){ // 判断有没有config.json这个文件
+      if (SPIFFS.remove("/index.html")){
+         Serial.println("删除文件");
+      } else {
+        Serial.println("删除文件失败");
+      } 
+    }
+}
+
 
 /* ----------------------------------------------------------主进程--------------------------------------------------------------- */
 void setup() {
-  Serial.begin(115200);   
-  Serial.println("");
+  // Serial.begin(115200);   
+  // Serial.println("");
   display.init();
+  display.setContrast(200); 
   display.clear();
   display.display();
   display.flipScreenVertically();
   configUpdate(&display);
-  // pinMode(3, INPUT_PULLUP);
-  // pinMode(1, INPUT_PULLUP);
+  pinMode(3, INPUT_PULLUP);
+  pinMode(1, INPUT_PULLUP);
   tick_key.attach_ms(1, keyScan);
   IP_ADDRESS = ip2Str(WiFi.localIP());
   ui.setTargetFPS(45);

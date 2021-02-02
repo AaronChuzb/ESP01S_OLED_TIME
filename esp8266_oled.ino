@@ -62,13 +62,29 @@ int KEY_NUM           = 0; //按键编号
 const int DISPLAY_LIGHT_MODE = 1; //显示模式 1：长亮，0：30秒后自动息屏
 String IP_ADDRESS;                //IP地址
 
+/* 进度条 */
+int PERCENT = 1;
+
+/* 是否配网 */
+bool ISCONFIG = false;
+
 
 /* ----------------------------------------------------------框架页面函数--------------------------------------------------------------- */
 
-/* 覆盖层 */
-void drawIpOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
+/* 已配网的覆盖层 */
+void drawOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   int x,y;
   display->drawHorizontalLine(0, 54, 128);//画横线
+}
+
+void drawUnconfigOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
+  int x,y;
+  // display->drawHorizontalLine(0, 54, 128);//画横线
+}
+
+/* 配网二维码页面 */
+void drawQRCode(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  display->drawXbm(96+x, 5+y, 16,16, ri);
 }
 
 /* 日期页面 */
@@ -143,13 +159,21 @@ void drawFrame4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int1
 void drawFrame5(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   display->drawXbm(96+x, 5+y, 16,16, ri);
 }
+FrameCallback frames[] = { drawDateTime, drawWeather, drawFrame3, drawFrame4, drawFrame5 }; //已配网的页面框架
+FrameCallback unconfigframes[] = { drawFrame5 }; //未配网的页面框架
+int frameCount = 5;
+OverlayCallback overlays[] = { drawOverlay }; //已配网的页面覆盖层
+OverlayCallback unconfigoverlays[] = { drawUnconfigOverlay };
+int overlaysCount = 1;
 
 
-/* ----------------------------------------------------------在没进入框架前的处理--------------------------------------------------------------- */
 
-/* 初次更新进度 */
-void upDateProgress(OLEDDisplay *display) {  //首次天气更新
-String tag = "normal";
+/* ----------------------------------------------------------WiFi配网--------------------------------------------------------------- */
+
+/* 配置网络和初次更新信息 */
+
+void configUpdate(OLEDDisplay *display) {
+  String tag = "normal";
   drawProgress(display, 0, "open spiffs");
   if (SPIFFS.begin()) { // 打开闪存文件系统 
     Serial.println("闪存文件系统打开成功");
@@ -158,6 +182,7 @@ String tag = "normal";
      Serial.println("闪存文件系统打开失败");
   }
   if(SPIFFS.exists("/config.json")){ // 判断有没有config.json这个文件
+    ISCONFIG = true;
     Serial.println("存在配置信息，正在自动连接");
     const size_t capacity = JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(2) + 60; //分配一个内存空间
     DynamicJsonDocument doc(capacity);// 声明json处理对象
@@ -173,12 +198,6 @@ String tag = "normal";
     }
     configJson.close();
     Serial.println(WiFi.localIP());
-    /* 页面框架定义 */
-    FrameCallback frames[] = { drawDateTime, drawWeather, drawFrame3, drawFrame4, drawFrame5 };
-    int frameCount = 5;
-
-    OverlayCallback overlays[] = { drawIpOverlay };
-    int overlaysCount = 1;
   } else {
     Serial.println("不存在配置信息，正在打开web配网模式"); 
     IPAddress softLocal(192,168,1,1);
@@ -187,10 +206,8 @@ String tag = "normal";
     WiFi.softAPConfig(softLocal, softGateway, softSubnet);
     WiFi.softAP("esp8266", "12345678"); //这里是配网模式下热点的名字和密码
     Serial.println(WiFi.softAPIP());
-    FrameCallback frames[] = { drawDateTime, drawWeather, drawFrame3, drawFrame4, drawFrame5 };
-    int frameCount = 5;
-    OverlayCallback overlays[] = { drawIpOverlay };
-    int overlaysCount = 1;
+    ISCONFIG = false;
+    frameCount = 1;
   }
   server.on("/", handleRoot);//web首页监听
   server.on("/set", handleConnect); // 配置ssid密码监听，感觉跟express的路由好像
@@ -218,16 +235,22 @@ String tag = "normal";
 }
 
 
+
+
 /* ------------------------------------------------------------方法和数据更新----------------------------------------------------------------- */
 
 /* 单个进度条方法 */
 void drawProgress(OLEDDisplay *display, int progress, String label) {
-  display->clear();
-  display->setTextAlignment(TEXT_ALIGN_CENTER);
-  display->setFont(ArialMT_Plain_10);
-  display->drawString(64, 10, label);
-  display->drawProgressBar(2, 28, 124, 10, progress);
-  display->display();
+  for (int i = PERCENT; i <= progress; i++ ) {
+    display->clear();
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+    display->setFont(ArialMT_Plain_10);
+    display->drawString(64, 10, label);
+    display->drawProgressBar(2, 28, 124, 10, i);
+    display->display();
+    delay(30);
+  }
+  PERCENT = progress;
 }
 
 /* IP地址转字符串 */
@@ -363,7 +386,7 @@ void setup() {
   display.clear();
   display.display();
   display.flipScreenVertically();
-  upDateProgress(&display);
+  configUpdate(&display);
   // pinMode(3, INPUT_PULLUP);
   // pinMode(1, INPUT_PULLUP);
   tick_key.attach_ms(1, keyScan);
@@ -371,13 +394,18 @@ void setup() {
   ui.setTargetFPS(45);
   ui.setActiveSymbol(activeSymbol);
   ui.setInactiveSymbol(inactiveSymbol);
-  // ui.disableAllIndicators();
   ui.disableAutoTransition();
   ui.setIndicatorPosition(BOTTOM);
   ui.setIndicatorDirection(LEFT_RIGHT);
   ui.setFrameAnimation(SLIDE_LEFT);
-  ui.setFrames(frames, frameCount);
-  ui.setOverlays(overlays, overlaysCount);
+  if (ISCONFIG) {
+    ui.setFrames(frames, frameCount);
+    ui.setOverlays(overlays, overlaysCount);
+  } else {
+    ui.disableAllIndicators();
+    ui.setFrames(unconfigframes, frameCount);
+    ui.setOverlays(unconfigoverlays, overlaysCount);
+  }
   ui.init();
   display.flipScreenVertically();
 }
@@ -387,10 +415,8 @@ void setup() {
 void loop() {
   display.clear();
   server.handleClient();
-
   int remainingTimeBudget = ui.update();
   if (remainingTimeBudget > 0) {
-    
     delay(remainingTimeBudget);
   }
 }

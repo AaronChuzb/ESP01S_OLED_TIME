@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天气城市配置</title>
+</head>
+<body>
+    <div class="main">
+        <h2>天气城市配置</h2>
+        <br>
+        <input class="input citycode" type="text" placeholder="城市代码" name="ssid">
+        <p>城市代码不会填的话去页面下方输入你的城市查</p>
+        <button class="button" onclick="sendData()">配置所在城市</button>
+        <br><br>
+        <h3>城市代码查询</h3>
+        <div class="citylist none">
+            <p>点击对应的城市或地区将自动填充城市代码</p>
+            <ul class="list"></ul>
+        </div>
+        <p>输入所在城市的小写拼音，大城市可以直接输入区名例如（chaoyang）</p>
+        <input class="input cityname" type="text" name="ssid">
+        <button class="button" onclick="getCityCode()">查询</button>
+    </div>
+</body>
+<script>
+    function sendData(){
+        let cityCode = document.querySelector(".citycode").value
+        if (cityCode == "") {
+            alert("请输入需要获取天气的城市的城市代码")
+            return
+        }
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function() {
+            if (xhttp.readyState == 4 && this.status == 200) {
+                console.log("配置成功")
+                alert("配置成功");
+            }
+        };
+        xhttp.open("GET", "setweather?citycode="+cityCode, true);
+        xhttp.send();
+    }
+    function getCityCode(){
+        let city = document.querySelector(".cityname")
+        if (city.value == "") {
+            return
+        }
+        if (!/^[a-z]*$/g.test(city.value)) {
+            alert("仅限小写字母");
+            return
+        }
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function() {
+            if (xhttp.readyState == 4 && this.status == 200) {
+                city.value = ""
+                let data = JSON.parse(xhttp.responseText)
+                console.log(data.location)
+                let box = document.querySelector(".citylist")
+                let list = document.querySelector(".list")
+                list.innerHTML = ""
+                box.classList.remove("none")
+                for (let i = 0; i < data.location.length; i++){
+                    let li = document.createElement("li")
+                    li.innerHTML = data.location[i].adm1 + "-" + data.location[i].adm2 + "-" + data.location[i].name + ":" + data.location[i].id
+                    list.appendChild(li)
+                }
+                list.addEventListener('click',function(e){
+                    let code = e.target.innerText.split(":")[1]
+                    let cityCode = document.querySelector(".citycode")
+                    cityCode.value = code
+                    window.scrollTo(0,0)
+                    e.target.style.color='pink'
+                    list.innerHTML = ""
+                    box.classList.add("none")
+                })
+                if(city == document.activeElement) {
+                    list.innerHTML = ""
+                    box.classList.add("none")
+                }
+            }
+        };
+        xhttp.open("GET", "https://geoapi.qweather.com/v2/city/lookup?location="+city.value+"&key=bdd98ec1d87747f3a2e8b1741a5af796", true);
+        xhttp.send();
+    }
+</script>
+<style>
+    html,body{
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+    }
+    .main{
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        text-align: center;
+    }
+    .button{
+        outline: none;
+        box-sizing: border-box;
+        background: #f5f5f5;
+        border: 1px solid#bdbdbd;
+        border-radius: 18px;
+        color: #434343;
+        cursor: pointer;
+        display: block;
+        font-family: inherit;
+        font-size: 16px;
+        font-variant: normal;
+        font-weight: 400;
+        height: 2.14285714em;
+        line-height: 1.42857143;
+        margin: 18px auto;
+        padding: 4px 30px;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .input{
+        resize: none;
+        outline: none;
+        margin: 4px auto;
+        height: 45px;
+        width: 80%;
+        border: 1px solid #d0d1ce;
+        padding-left: 15px;
+        font-size: 14px;
+        color: #000;
+        margin-left: 10px;
+        border-radius: 10px;
+        border: 1px solid #dcdfe6;
+        background-color: #fff;
+    }
+    p{
+        color: #c4c6c4;
+        text-align: center;
+        margin-top: 10px;
+        font-size: 12px;
+    }
+    .citylist{
+        margin: 4px auto;
+        width: 80%;
+        border: 1px solid #d0d1ce;
+        border-radius: 10px;
+        text-align: start;
+    }
+    .none {
+        display: none;
+    }
+</style>
+</html>

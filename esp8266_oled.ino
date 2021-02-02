@@ -23,13 +23,13 @@ OLEDDisplayUi ui     ( &display );
 
 /* wifi连接与配网相关定义 */
 
-const char* WIFI_SSID = "zb";  //WIFI名称及密码
-const char* WIFI_PWD = "571388081";
+String WIFI_SSID = "";  //WIFI名称及密码
+String WIFI_PWD = "";
 
 /* 天气api相关定义 */
 
 const String UserKey = "c2309af516b04492a222943c075683c3";   // 私钥 https://dev.heweather.com/docs/start/get-api-key
-const String Location = "101280101";                         // 城市代码 https://github.com/heweather/LocationList,表中的 Location_ID
+String Location = "101280101";                         // 城市代码 https://github.com/heweather/LocationList,表中的 Location_ID
 const String Unit = "m";                                     // 公制-m/英制-i
 const String Lang = "en";                                    // 语言 英文-en/中文-zh
 int ROUND = 15 * 60000;                                      // 更新间隔<分钟>实时天气API 10~20分钟更新一次
@@ -129,17 +129,27 @@ void drawWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
   display->setFont(Meteocons_Plain_36);
   display->drawString(x + 0, y+0  , WEATHER_ICON);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
-  display->setFont(DSEG7_Classic_Regular_32);
-  display->drawString(x + 35, y + 2, TEMP);
+  display->setFont(DSEG7_Classic_Regular_20);
+  int temppos;
+  if(TEMP.length() == 1) {
+    temppos = 65;
+  }
+  if(TEMP.length() == 2) {
+    temppos = 55;
+  }
+  if(TEMP.length() > 2){
+    temppos = 35;
+  }
+  display->drawString(x + temppos, y + 8, TEMP);
   // display->setFont(Cousine_Regular_36);
   // display->drawString(x + 72, y + 2, "°C");
-  display->drawXbm(x + 88, y + 2, 40, 40, c);
+  display->drawXbm(x + 88, y + 6, 28, 28, c);
   int pos;
   if(length == 1) { pos = 12; }
   if(length == 2) { pos = 10; }
   if(length == 3) { pos = 4; }
   if(length >= 4) { pos = 0; }
-  drawChinese(display, pos + x, 38 + y, WEATHER_TYPE);
+  drawChinese(display, pos + x, 42 + y, WEATHER_TYPE);
   drawChinese(display, 60 + x, 38 + y, "湿度");
   display->setFont(Dialog_plain_12);
   display->drawString(x + 88, y + 38, ':' + String(int(HUM)) + '%');
@@ -187,14 +197,21 @@ void configUpdate(OLEDDisplay *display) {
   if(SPIFFS.exists("/config.json")){ // 判断有没有config.json这个文件
     ISCONFIG = true;
     Serial.println("存在配置信息，正在自动连接");
-    const size_t capacity = JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(2) + 60; //分配一个内存空间
+    const size_t capacity = JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(2) + JSON_OBJECT_SIZE(3) + 90; //分配一个内存空间
     DynamicJsonDocument doc(capacity);// 声明json处理对象
     File configJson = SPIFFS.open("/config.json", "r");
     deserializeJson(doc, configJson); // json数据序列化
-    const char* ssid = doc["ssid"];
-    const char* password = doc["password"];
+    const String ssid = doc["ssid"];
+    const String password = doc["password"];
+    const String citycode = doc["citycode"];
+    Serial.println(citycode);
+    Location = citycode;
+    WIFI_SSID = ssid;
+    WIFI_PWD = password;
+    Serial.println(WIFI_SSID);
+    Serial.println(WIFI_PWD);
     WiFi.mode(WIFI_STA); // 更换wifi模式
-    WiFi.begin(ssid, password); // 连接wifi
+    WiFi.begin(ssid.c_str(), password.c_str()); // 连接wifi
     while(WiFi.status()!= WL_CONNECTED){
       delay(500);
       Serial.println(".");  
@@ -208,12 +225,13 @@ void configUpdate(OLEDDisplay *display) {
     IPAddress softSubnet(255,255,255,0);
     WiFi.softAPConfig(softLocal, softGateway, softSubnet);
     WiFi.softAP("WeatherClock", "liSFYpxC"); //这里是配网模式下热点的名字和密码（不用记）
-    Serial.println(WiFi.softAPIP());
     ISCONFIG = false;
     frameCount = 1;
   }
   server.on("/", HTTP_ANY, handleRoot);//web首页监听
   server.on("/set", handleConnect); // 配置ssid密码监听，感觉跟express的路由好像
+  server.on("/setweather", handleWeather);
+  server.onNotFound(handleNotFound); //web服务监听未找到路径的处理方式
   server.begin();
   if(ISCONFIG) {
     drawProgress(display, 50, "更新时间");
@@ -224,6 +242,7 @@ void configUpdate(OLEDDisplay *display) {
       int icon_code = weatherNow.getIcon();
       WEATHER_ICON = getIcons(String(icon_code));
       TEMP =  String(weatherNow.getTemp());
+      Serial.println(TEMP);
       String type = getWeatherType(icon_code);
       HUM = weatherNow.getHumidity();
       length = type.length() / 3;
@@ -247,7 +266,6 @@ void configUpdate(OLEDDisplay *display) {
 void drawProgress(OLEDDisplay *display, int progress, char* label) {
   for (int i = PERCENT; i <= progress; i++ ) {
     display->clear();
-    
     display->setTextAlignment(TEXT_ALIGN_CENTER);
     display->setFont(ArialMT_Plain_10);
     // display->drawString(64, 10, label);
@@ -318,7 +336,6 @@ void keyScan() {
   if (KEY_STATE_NOW == 0 && KEY_STATE == 2){ //按键长按
     if(KEY_NUM == 3){
       display.displayOn();
-      removeData();
     }
     if(KEY_NUM == 1){
       display.displayOff();
@@ -356,47 +373,92 @@ void drawChinese(OLEDDisplay *display, int x, int y, const char chinese[]) {
 }
 
 void handleRoot() { //展示网页的关键代码
-  Serial.println("访问");
-  Dir dir = SPIFFS.openDir("/");
-  while (dir.next()){
-    Serial.println(dir.fileName());
+  if(!ISCONFIG){
+    if(SPIFFS.exists("/index.html")){
+        File index = SPIFFS.open("/index.html", "r");
+        server.streamFile(index, "text/html");
+        index.close();
+    } else {
+      handleNotFound();
+    }
+  } else {
+    if(SPIFFS.exists("/weather.html")){
+        File weather = SPIFFS.open("/weather.html", "r");
+        server.streamFile(weather, "text/html");
+        weather.close();
+    } else {
+      handleNotFound();
+    }
   }
-  if(SPIFFS.exists("/index.html")){
-      File index = SPIFFS.open("/index.html", "r");
-      server.streamFile(index, "text/html");
-      index.close();
-  }  
 }
 
 void handleConnect() { //处理配置信息的函数
   String ssid = server.arg("ssid");   //arg是获取请求参数，视频中最后面展示了请求的完整链接
   String password = server.arg("password");
+  String citycode = "101280101"; //默认广州天气
+  server.sendHeader("Access-Control-Allow-Origin", "*"); //允许跨域的请求头
+  server.send(200, "text/plain", "OK");
+  delay(500);
   WiFi.mode(WIFI_STA); //改变wifi模式
   WiFi.begin(ssid.c_str(), password.c_str());//String类型直接用会报错，不要问为什么，转成char *就行了。
   while(WiFi.status()!= WL_CONNECTED){
-     delay(500);
-     Serial.println(".");  
+    delay(500);
+    Serial.println(".");
   }
-  server.sendHeader("Access-Control-Allow-Origin", "*"); //允许跨域的请求头
-  server.send(200, "text/plain", "OK");
   Serial.println(WiFi.localIP());
   removeConfig(); // 不管有没有配置先删除一次再说。
-  String payload; // 拼接构造一段字符串形式的json数据长{"ssid":"xxxxx","password":"xxxxxxxxxxx"}
+  String payload; // 拼接构造一段字符串形式的json数据长{"ssid":"xxxxx","password":"xxxxxxxxxxx","citycode":"xxxx"}
   payload += "{\"ssid\":\"";
   payload += ssid;
   payload +="\",\"password\":\"";
   payload += password;
+  payload +="\",\"citycode\":\"";
+  payload += citycode;
   payload += "\"}";
+  
   File wifiConfig = SPIFFS.open("/config.json", "w");
   wifiConfig.println(payload);//将数据写入config.json文件中
   wifiConfig.close();
   ESP.restart();
 }
 
+
+void handleWeather() {
+  String citycode = server.arg("citycode");
+  Location = citycode;
+  server.sendHeader("Access-Control-Allow-Origin", "*"); //允许跨域的请求头
+  server.send(200, "text/plain", "OK");
+  removeConfig(); // 不管有没有配置先删除一次再说。
+  const String ssid = WIFI_SSID;
+  const String password = WIFI_PWD;
+  String payload; // 拼接构造一段字符串形式的json数据长{"ssid":"xxxxx","password":"xxxxxxxxxxx","citycode":"xxxx"}
+  payload += "{\"ssid\":\"";
+  payload += ssid;
+  payload +="\",\"password\":\"";
+  payload += password;
+  payload += "\",\"citycode\":\"";
+  payload += citycode;
+  payload += "\"}";
+  Serial.println(payload);
+  File weatherConfig = SPIFFS.open("/config.json", "w");
+  weatherConfig.println(payload);//将数据写入config.json文件中
+  delay(100);
+  weatherConfig.close();
+  delay(100);
+  ESP.restart();
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  server.sendHeader("Access-Control-Allow-Origin", "*"); //允许跨域的请求头
+  server.send(404, "text/plain", message);
+}
+
+
 void removeConfig(){
     if(SPIFFS.exists("/config.json")){ // 判断有没有config.json这个文件
       if (SPIFFS.remove("/config.json")){
-         Serial.println("删除旧配置");
+        Serial.println("删除旧配置");
       } else {
         Serial.println("删除旧配置失败");
       } 
@@ -404,20 +466,15 @@ void removeConfig(){
 }
 
 void removeData(){
-    if(SPIFFS.exists("/index.html")){ // 判断有没有config.json这个文件
-      if (SPIFFS.remove("/index.html")){
-         Serial.println("删除文件");
-      } else {
-        Serial.println("删除文件失败");
-      } 
-    }
+    SPIFFS.format();
 }
 
 
 /* ----------------------------------------------------------主进程--------------------------------------------------------------- */
 void setup() {
-  // Serial.begin(115200);   
-  // Serial.println("");
+  /* Serial.begin(115200);   
+  Serial.println(""); */
+  
   display.init();
   display.setContrast(200); 
   display.clear();

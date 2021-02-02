@@ -11,20 +11,24 @@
         <br>
         <input class="input ssid" type="text" placeholder="SSID" name="ssid">
         <input class="input password" type="password" placeholder="密码" name="password">
-        <button class="button" onclick="sendData()">配置</button>
+        <button class="button" onclick="sendData()">一键配置</button>
     </div>
 </body>
 <script>
     function sendData(){
         let ssid = document.querySelector(".ssid").value
         let password = document.querySelector(".password").value
-        if(ssid == "" || password == ""){
+        if (ssid == "") {
+            alert("请输入需要连接的WiFi名称")
             return
         }
-        console.log(ssid,password)
+        if (password == "") {
+            alert("请输入需要连接的WiFi的密码")
+            return
+        }
         var xhttp = new XMLHttpRequest();
         xhttp.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
+            if (xhttp.readyState == 4 && this.status == 200) {
                 console.log("配置成功")
                 alert("配置成功");
             }
@@ -82,7 +86,11 @@
         border: 1px solid #dcdfe6;
         background-color: #fff;
     }
-    
-    
+    p{
+        color: #c4c6c4;
+        text-align: center;
+        margin-top: 10px;
+        font-size: 12px;
+    }
 </style>
 </html>

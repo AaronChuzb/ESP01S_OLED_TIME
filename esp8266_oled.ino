@@ -212,7 +212,7 @@ void configUpdate(OLEDDisplay *display) {
     ISCONFIG = false;
     frameCount = 1;
   }
-  server.on("/", handleRoot);//web首页监听
+  server.on("/", HTTP_ANY, handleRoot);//web首页监听
   server.on("/set", handleConnect); // 配置ssid密码监听，感觉跟express的路由好像
   server.begin();
   if(ISCONFIG) {
@@ -370,14 +370,15 @@ void handleRoot() { //展示网页的关键代码
 
 void handleConnect() { //处理配置信息的函数
   String ssid = server.arg("ssid");   //arg是获取请求参数，视频中最后面展示了请求的完整链接
-  String password = server.arg("password"); 
-  server.send(200, "text/plain", "OK");
+  String password = server.arg("password");
   WiFi.mode(WIFI_STA); //改变wifi模式
   WiFi.begin(ssid.c_str(), password.c_str());//String类型直接用会报错，不要问为什么，转成char *就行了。
   while(WiFi.status()!= WL_CONNECTED){
      delay(500);
      Serial.println(".");  
   }
+  server.sendHeader("Access-Control-Allow-Origin", "*"); //允许跨域的请求头
+  server.send(200, "text/plain", "OK");
   Serial.println(WiFi.localIP());
   removeConfig(); // 不管有没有配置先删除一次再说。
   String payload; // 拼接构造一段字符串形式的json数据长{"ssid":"xxxxx","password":"xxxxxxxxxxx"}
